@@ -1,74 +1,54 @@
+#!/usr/bin/env python3
 import argparse
-import sys
-from urllib.parse import urlparse, unquote
+import re
+from urllib.parse import urlparse, unquote_plus
 from collections import Counter
 from beautifultable import BeautifulTable
 
-SEPARATORS = ['&', ';', ',', '|']
-
-def normalize_url(url):
-    url = url.strip()
-    if not url:
-        return None
-    if not url.startswith(('http://', 'https://')):
-        url = 'http://' + url
+def normalize_url(url: str) -> str:
+    if not re.match(r'^[a-zA-Z][a-zA-Z0-9+.-]*://', url):
+        return 'http://' + url
     return url
 
-
-def extract_params_from_url(url):
-    parsed = urlparse(url)
-    raw_query = parsed.query or ''
-    for sep in SEPARATORS:
-        raw_query = raw_query.replace(sep, '&')
-
-    params = []
-    for segment in raw_query.split('&'):
+def extract_keys_from_url(url: str, sep_pattern: str) -> list[str]:
+    query = urlparse(url).query
+    query = re.sub(sep_pattern, '&', query)
+    keys = []
+    for segment in query.split('&'):
         if not segment:
             continue
-        parts = segment.split('=', 1)
-        key = unquote(parts[0])
-        if key:
-            params.append(key)
-    return params
-
+        key, *_ = segment.split('=', 1)
+        key = unquote_plus(key)
+        if re.fullmatch(r'[A-Za-z0-9_-]+', key):
+            keys.append(key)
+    return keys
 
 def main():
-    parser = argparse.ArgumentParser(description='Extract URL parameter names from a list of URLs')
-    parser.add_argument('-f', '--file', required=True, help='Input file with one URL per line')
-    parser.add_argument('-o', '--output', required=True, help='Output file to save unique parameter names')
+    parser = argparse.ArgumentParser(description="Extract unique URL parameter names and their counts.")
+    parser.add_argument('-f', '--file', required=True, help="Input file with one URL per line")
+    parser.add_argument('-o', '--output', required=True, help="Output file for unique parameter names")
     args = parser.parse_args()
-
     counter = Counter()
-    unique_params = set()
+    sep_pattern = r'[;,|]'  
 
-    try:
-        with open(args.file, 'r', encoding='utf-8') as f:
-            for line in f:
-                url = normalize_url(line)
-                if not url:
-                    continue
-                try:
-                    params = extract_params_from_url(url)
-                except Exception as e:
-                    print(f"Warning: could not parse URL '{line.strip()}': {e}", file=sys.stderr)
-                    continue
-                for p in params:
-                    unique_params.add(p)
-                    counter[p] += 1
-    except FileNotFoundError:
-        print(f"Error: input file '{args.file}' not found.", file=sys.stderr)
-        sys.exit(1)
-    with open(args.output, 'w', encoding='utf-8') as out:
-        for param in sorted(unique_params):
-            out.write(param + '\n')
-    if counter:
-        table = BeautifulTable()
-        table.columns.header = ["Parameter", "Count"]
-        for param, cnt in counter.most_common():
-            table.rows.append([param, cnt])
-        print(table)
-    else:
-        print("No parameters found.")
+    with open(args.file, 'r', encoding='utf-8') as fin:
+        for line in fin:
+            url = line.strip()
+            if not url:
+                continue
+            url = normalize_url(url)
+            keys = extract_keys_from_url(url, sep_pattern)
+            counter.update(keys)
 
-if __name__ == '__main__':
+    with open(args.output, 'w', encoding='utf-8') as fout:
+        for key in sorted(counter):
+            fout.write(f"{key}\n")
+
+    table = BeautifulTable()
+    table.column_headers = ["Parameter", "Count"]
+    for key, cnt in counter.most_common():
+        table.append_row([key, str(cnt)])
+    print(table)
+
+if __name__ == "__main__":
     main()
